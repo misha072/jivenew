@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: system-ui, sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-dance-primary hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200;
+  }
+  
+  .btn-secondary {
+    @apply bg-dance-secondary hover:bg-teal-500 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200;
+  }
+  
+  .score-overlay {
+    @apply absolute top-4 right-4 bg-black bg-opacity-75 text-white p-4 rounded-lg text-2xl font-bold;
+  }
+  
+  .video-container {
+    @apply relative w-full h-64 bg-black rounded-lg overflow-hidden;
+  }
+}

@@ -1,0 +1,28 @@
+/* [project]/src/cedar/components/chatInput/ChatInput.css [app-client] (css) */
+.ProseMirror p.is-editor-empty:first-child:before {
+  content: attr(data-placeholder);
+  float: left;
+  color: #9ca3af;
+  pointer-events: none;
+  height: 0;
+}
+
+.dark .ProseMirror p.is-editor-empty:first-child:before {
+  color: #6b7280;
+}
+
+.ProseMirror {
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: pre-wrap;
+  min-height: 1.5em;
+  line-height: 1.5;
+}
+
+.ProseMirror .hard-break {
+  height: 0;
+  display: block;
+}
+
+/*# sourceMappingURL=src_cedar_components_chatInput_ChatInput_d4727059.css.map*/

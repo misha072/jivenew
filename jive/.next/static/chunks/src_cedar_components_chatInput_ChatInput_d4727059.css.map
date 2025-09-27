@@ -1,0 +1,6 @@
+{
+  "version": 3,
+  "sources": [],
+  "sections": [
+    {"offset": {"line": 1, "column": 0}, "map": {"version":3,"sources":["file:///Users/misha/Downloads/jive/jive/src/cedar/components/chatInput/ChatInput.css"],"sourcesContent":["/* Tiptap placeholder styles */\n.ProseMirror p.is-editor-empty:first-child::before {\n\tcontent: attr(data-placeholder);\n\tfloat: left;\n\tcolor: #9ca3af; /* text-gray-400 */\n\tpointer-events: none;\n\theight: 0;\n}\n\n.dark .ProseMirror p.is-editor-empty:first-child::before {\n\tcolor: #6b7280; /* text-gray-500 */\n}\n\n/* Ensure proper line height for multi-line support and word wrapping */\n.ProseMirror {\n\tmin-height: 1.5em;\n\tline-height: 1.5;\n\tword-wrap: break-word;\n\toverflow-wrap: anywhere;\n\tword-break: break-word;\n\twhite-space: pre-wrap;\n}\n\n/* Style for hard breaks */\n.ProseMirror .hard-break {\n\tdisplay: block;\n\theight: 0;\n}\n"],"names":[],"mappings":"AACA;;;;;;;;AAQA;;;;AAKA;;;;;;;;;AAUA","debugId":null}}]
+}
