@@ -3,9 +3,11 @@
 // FIXED: Main app component with proper TensorFlow.js initialization and pose detection
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { poseDetectionManager, Pose, PoseFrame, calculatePoseSimilarity } from '@/lib/poseDetection';
+import { similarity17, biggestHint17, resetPoseSmoothing, withTimingGrace, LM } from '@/src/lib/poseMetrics';
 import VideoPlayer from '@/components/VideoPlayer';
 import WebcamPlayer from '@/components/WebcamPlayer';
 import SkeletonCanvas from '@/components/SkeletonCanvas';
+import VideoPosePlayer, { VideoPosePlayerRef } from '@/components/VideoPosePlayer';
 
 export default function Home() {
   // State management
@@ -19,10 +21,11 @@ export default function Home() {
   const [similarityScore, setSimilarityScore] = useState(0);
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentHint, setCurrentHint] = useState<string>('');
 
   // FIXED: Video and webcam refs for real-time pose detection
   const webcamRef = useRef<HTMLVideoElement>(null);
-  const referenceVideoRef = useRef<HTMLVideoElement>(null);
+  const videoPosePlayerRef = useRef<VideoPosePlayerRef>(null);
   const animationFrameRef = useRef<number | null>(null);
 
   // FIXED: Initialize TensorFlow.js and pose detector on component mount
@@ -82,35 +85,54 @@ export default function Home() {
 
   // FIXED: Real-time pose comparison function
   const performRealTimeComparison = useCallback(async () => {
-    if (!isPlaying || !webcamRef.current || !referenceVideoRef.current) return;
+    if (!isPlaying || !webcamRef.current) return;
 
     try {
-      // FIXED: Detect poses from both webcam and reference video simultaneously
-      const [webcamPoses, referencePoses] = await Promise.all([
-        poseDetectionManager.detectPoses(webcamRef.current),
-        poseDetectionManager.detectPoses(referenceVideoRef.current)
-      ]);
+      // FIXED: Detect poses from webcam only (reference video poses come from VideoPosePlayer)
+      const webcamPoses = await poseDetectionManager.detectPoses(webcamRef.current);
 
-      // FIXED: Update pose states
+      // FIXED: Update webcam pose state
       const newWebcamPose = webcamPoses.length > 0 ? webcamPoses[0] : null;
-      const newReferencePose = referencePoses.length > 0 ? referencePoses[0] : null;
-      
       setCurrentPose(newWebcamPose);
-      setReferencePose(newReferencePose);
 
       // FIXED: Log detected poses for debugging
       if (newWebcamPose) {
         console.log('Webcam pose detected:', newWebcamPose.keypoints.length, 'keypoints');
       }
-      if (newReferencePose) {
-        console.log('Reference pose detected:', newReferencePose.keypoints.length, 'keypoints');
+      if (referencePose) {
+        console.log('Reference pose detected:', referencePose.keypoints.length, 'keypoints');
       }
 
       // FIXED: Calculate similarity score if both poses are available
-      if (newWebcamPose && newReferencePose) {
-        const similarity = calculatePoseSimilarity(newReferencePose, newWebcamPose);
-        setSimilarityScore(similarity);
-        console.log('Real-time similarity score:', similarity);
+      if (newWebcamPose && referencePose) {
+        // Convert poses to LM format for new similarity function
+        const refKeypoints: LM = referencePose.keypoints.map(kp => ({
+          x: kp.x,
+          y: kp.y,
+          score: kp.score
+        }));
+        const liveKeypoints: LM = newWebcamPose.keypoints.map(kp => ({
+          x: kp.x,
+          y: kp.y,
+          score: kp.score
+        }));
+        
+        // Use new similarity function with timing grace
+        const similarity = withTimingGrace(refKeypoints, liveKeypoints);
+        setSimilarityScore(Math.round(similarity * 100));
+        
+        // Get hint if similarity is low
+        if (similarity < 0.7) {
+          const hint = biggestHint17(refKeypoints, liveKeypoints);
+          setCurrentHint(hint);
+        } else {
+          setCurrentHint('');
+        }
+        
+        console.log('Real-time similarity score:', Math.round(similarity * 100) + '%');
+        if (similarity < 0.7) {
+          console.log('Hint:', currentHint);
+        }
       }
 
       // FIXED: Continue with requestAnimationFrame for smooth real-time detection
@@ -119,7 +141,7 @@ export default function Home() {
       console.error('Error in real-time pose comparison:', error);
       animationFrameRef.current = requestAnimationFrame(performRealTimeComparison);
     }
-  }, [isPlaying]);
+  }, [isPlaying, referencePose]);
 
   // FIXED: Handle current pose from webcam (keeping existing functionality)
   const handleCurrentPoseDetected = useCallback((pose: Pose | null) => {
@@ -137,21 +159,34 @@ export default function Home() {
   }, [referencePoses, currentFrame]);
 
   // FIXED: Game controls
-  const startGame = useCallback(() => {
+  const startGame = useCallback(async () => {
     if (!videoFile) {
       console.log('Cannot start game: missing video');
       return;
     }
+    
     setIsPlaying(true);
     setCurrentFrame(0);
     setSimilarityScore(0);
     setReferencePose(null);
+    setCurrentHint('');
+    
+    // Reset pose smoothing for new round
+    resetPoseSmoothing();
     console.log('Game started');
     
-    // FIXED: Start reference video playback
-    if (referenceVideoRef.current) {
-      referenceVideoRef.current.currentTime = 0;
-      referenceVideoRef.current.play();
+    // FIXED: Explicitly start video playback
+    try {
+      if (videoPosePlayerRef.current) {
+        console.log('Starting video playback via ref...');
+        await videoPosePlayerRef.current.play();
+        console.log('Video playback started successfully');
+      }
+    } catch (error) {
+      console.error('Error starting video:', error);
+      if (error instanceof Error && error.name === 'NotAllowedError') {
+        console.warn('Autoplay blocked. Video will start when user interacts.');
+      }
     }
     
     // FIXED: Start real-time pose comparison
@@ -161,9 +196,9 @@ export default function Home() {
   const pauseGame = useCallback(() => {
     setIsPlaying(false);
     
-    // FIXED: Pause reference video
-    if (referenceVideoRef.current) {
-      referenceVideoRef.current.pause();
+    // FIXED: Pause video explicitly
+    if (videoPosePlayerRef.current) {
+      videoPosePlayerRef.current.pause();
     }
     
     // FIXED: Stop real-time comparison
@@ -181,16 +216,15 @@ export default function Home() {
     setCurrentPose(null);
     setReferencePose(null);
     
+    // FIXED: Reset video explicitly
+    if (videoPosePlayerRef.current) {
+      videoPosePlayerRef.current.reset();
+    }
+    
     // FIXED: Stop real-time comparison
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
-    }
-    
-    // FIXED: Reset video to beginning
-    if (referenceVideoRef.current) {
-      referenceVideoRef.current.currentTime = 0;
-      referenceVideoRef.current.pause();
     }
     
     console.log('Game reset');
@@ -294,6 +328,14 @@ export default function Home() {
                 Frame {currentFrame + 1} / {referencePoses.length}
               </div>
             </div>
+            
+            {/* Hint Display */}
+            {currentHint && (
+              <div className="mt-4 inline-block bg-yellow-600 bg-opacity-90 text-white p-4 rounded-lg">
+                <div className="text-lg font-semibold">💡 Hint:</div>
+                <div className="text-sm">{currentHint}</div>
+              </div>
+            )}
           </div>
         )}
 
@@ -304,25 +346,14 @@ export default function Home() {
             <h2 className="text-2xl font-bold text-white text-center">Reference Video</h2>
             <div className="relative h-[70vh] bg-black rounded-lg overflow-hidden">
               {videoUrl ? (
-                <>
-                  <video
-                    ref={referenceVideoRef}
-                    src={videoUrl}
-                    className="w-full h-full object-contain"
-                    muted
-                    playsInline
-                    onPlay={() => console.log('Reference video started playing')}
-                    onPause={() => console.log('Reference video paused')}
-                    onEnded={() => console.log('Reference video ended')}
-                  />
-                  <SkeletonCanvas
-                    pose={referencePose}
-                    width={800}
-                    height={600}
-                    color="#4ecdc4"
-                    className="opacity-80"
-                  />
-                </>
+                <VideoPosePlayer
+                  ref={videoPosePlayerRef}
+                  videoUrl={videoUrl}
+                  onReferencePose={setReferencePose}
+                  isPlaying={isPlaying}
+                  width={800}
+                  height={600}
+                />
               ) : (
                 <div className="flex items-center justify-center h-full text-white text-xl">
                   Upload a video to start
