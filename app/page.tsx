@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { poseDetectionManager, Pose, PoseFrame, calculatePoseSimilarity } from '@/lib/poseDetection';
 import { similarity17, biggestHint17, resetPoseSmoothing, withTimingGrace, LM } from '@/src/lib/poseMetrics';
+import { PoseScoringSystem, Keypoint, calculateScore, cosineSimilarity } from '@/src/lib/poseScoring';
 import VideoPlayer from '@/components/VideoPlayer';
 import WebcamPlayer from '@/components/WebcamPlayer';
 import SkeletonCanvas from '@/components/SkeletonCanvas';
@@ -22,11 +23,17 @@ export default function Home() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentHint, setCurrentHint] = useState<string>('');
+  const [realTimeScore, setRealTimeScore] = useState<number>(0);
+  const [sessionTotal, setSessionTotal] = useState<number>(0);
+  const [sessionAverage, setSessionAverage] = useState<number>(0);
+  const [sessionCount, setSessionCount] = useState<number>(0);
 
   // FIXED: Video and webcam refs for real-time pose detection
   const webcamRef = useRef<HTMLVideoElement>(null);
   const videoPosePlayerRef = useRef<VideoPosePlayerRef>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const liveKPRef = useRef<Keypoint[] | null>(null);
+  const scoringSystemRef = useRef<PoseScoringSystem | null>(null);
 
   // FIXED: Initialize TensorFlow.js and pose detector on component mount
   useEffect(() => {
@@ -36,6 +43,14 @@ export default function Home() {
         await poseDetectionManager.initialize();
         setIsInitialized(true);
         console.log('Pose detection initialized successfully');
+        
+        // Initialize scoring system (simplified since we do scoring in the main loop)
+        scoringSystemRef.current = new PoseScoringSystem(
+          (score: number) => {
+            // This won't be used since we calculate scores directly in the loop
+          }
+        );
+        console.log('Scoring system initialized');
       } catch (err) {
         console.error('Failed to initialize pose detection:', err);
         setError('Failed to initialize pose detection. Please refresh the page.');
@@ -47,6 +62,9 @@ export default function Home() {
     // FIXED: Cleanup on unmount
     return () => {
       poseDetectionManager.dispose();
+      if (scoringSystemRef.current) {
+        scoringSystemRef.current.reset();
+      }
     };
   }, []);
 
@@ -95,15 +113,26 @@ export default function Home() {
       const newWebcamPose = webcamPoses.length > 0 ? webcamPoses[0] : null;
       setCurrentPose(newWebcamPose);
 
-      // FIXED: Log detected poses for debugging
+      // Update live keypoints reference
       if (newWebcamPose) {
+        const liveKeypoints: Keypoint[] = newWebcamPose.keypoints.map(kp => ({
+          x: kp.x,
+          y: kp.y,
+          score: kp.score
+        }));
+        liveKPRef.current = liveKeypoints;
+        
         console.log('Webcam pose detected:', newWebcamPose.keypoints.length, 'keypoints');
+      } else {
+        liveKPRef.current = null;
       }
+
+      // FIXED: Log detected poses for debugging
       if (referencePose) {
         console.log('Reference pose detected:', referencePose.keypoints.length, 'keypoints');
       }
 
-      // FIXED: Calculate similarity score if both poses are available
+      // FIXED: Calculate similarity score if both poses are available (legacy)
       if (newWebcamPose && referencePose) {
         // Convert poses to LM format for new similarity function
         const refKeypoints: LM = referencePose.keypoints.map(kp => ({
@@ -133,6 +162,42 @@ export default function Home() {
         if (similarity < 0.7) {
           console.log('Hint:', currentHint);
         }
+      }
+
+      // REAL-TIME SCORING: Calculate tiered score directly in the pose comparison loop
+      if (newWebcamPose && referencePose) {
+        // Convert poses to Keypoint format for scoring
+        const refKeypointsForScoring: Keypoint[] = referencePose.keypoints.map(kp => ({
+          x: kp.x,
+          y: kp.y,
+          score: kp.score
+        }));
+        const liveKeypointsForScoring: Keypoint[] = newWebcamPose.keypoints.map(kp => ({
+          x: kp.x,
+          y: kp.y,
+          score: kp.score
+        }));
+
+        // Calculate cosine similarity
+        const cosineSim = cosineSimilarity(refKeypointsForScoring, liveKeypointsForScoring);
+        
+        // Calculate tiered score
+        const tieredScore = calculateScore(cosineSim);
+        setRealTimeScore(tieredScore);
+        
+        // Update session statistics
+        setSessionTotal(prev => prev + tieredScore);
+        setSessionCount(prev => prev + 1);
+        setSessionAverage(prev => {
+          const newCount = sessionCount + 1;
+          const newTotal = sessionTotal + tieredScore;
+          return Math.round(newTotal / newCount);
+        });
+        
+        console.log(`Real-time scoring: Cosine sim=${cosineSim.toFixed(3)}, Tiered score=${tieredScore}`);
+      } else {
+        // No poses detected, reset score
+        setRealTimeScore(0);
       }
 
       // FIXED: Continue with requestAnimationFrame for smooth real-time detection
@@ -175,12 +240,18 @@ export default function Home() {
     resetPoseSmoothing();
     console.log('Game started');
     
+    // Scoring is now handled directly in the pose comparison loop
+    console.log('Game started - scoring will begin with pose detection');
+    
     // FIXED: Explicitly start video playback
     try {
       if (videoPosePlayerRef.current) {
         console.log('Starting video playback via ref...');
         await videoPosePlayerRef.current.play();
         console.log('Video playback started successfully');
+        
+        // Real-time scoring is handled in the pose comparison loop
+        console.log('Video started - real-time scoring will begin with pose detection');
       }
     } catch (error) {
       console.error('Error starting video:', error);
@@ -201,6 +272,8 @@ export default function Home() {
       videoPosePlayerRef.current.pause();
     }
     
+    // Scoring stops automatically when pose comparison stops
+    
     // FIXED: Stop real-time comparison
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -215,11 +288,17 @@ export default function Home() {
     setSimilarityScore(0);
     setCurrentPose(null);
     setReferencePose(null);
+    setRealTimeScore(0);
+    setSessionTotal(0);
+    setSessionAverage(0);
+    setSessionCount(0);
     
     // FIXED: Reset video explicitly
     if (videoPosePlayerRef.current) {
       videoPosePlayerRef.current.reset();
     }
+    
+    // Scoring resets automatically with state reset
     
     // FIXED: Stop real-time comparison
     if (animationFrameRef.current) {
@@ -319,13 +398,41 @@ export default function Home() {
         {/* Score Display */}
         {isPlaying && (
           <div className="text-center mb-8">
-            <div className="inline-block bg-black bg-opacity-75 text-white p-6 rounded-lg">
-              <div className="text-4xl font-bold text-green-400 mb-2">
-                {similarityScore}%
+            <div className="flex justify-center gap-4">
+              {/* Legacy Similarity Score */}
+              <div className="inline-block bg-black bg-opacity-75 text-white p-6 rounded-lg">
+                <div className="text-4xl font-bold text-green-400 mb-2">
+                  {similarityScore}%
+                </div>
+                <div className="text-lg">Similarity Score</div>
+                <div className="text-sm text-gray-300 mt-2">
+                  Frame {currentFrame + 1} / {referencePoses.length}
+                </div>
               </div>
-              <div className="text-lg">Similarity Score</div>
-              <div className="text-sm text-gray-300 mt-2">
-                Frame {currentFrame + 1} / {referencePoses.length}
+              
+              {/* Real-time Scoring System */}
+              <div className="inline-block bg-blue-900 bg-opacity-75 text-white p-6 rounded-lg">
+                <div className="text-4xl font-bold text-blue-400 mb-2">
+                  {realTimeScore}%
+                </div>
+                <div className="text-lg">Tiered Score</div>
+                <div className="text-sm text-gray-300 mt-2">
+                  {realTimeScore === 100 && 'Perfect Match!'}
+                  {realTimeScore === 75 && 'Partial Match'}
+                  {realTimeScore === 50 && 'Poor Match'}
+                  {realTimeScore === 0 && 'Fail'}
+                </div>
+              </div>
+              
+              {/* Session Statistics */}
+              <div className="inline-block bg-purple-900 bg-opacity-75 text-white p-6 rounded-lg">
+                <div className="text-2xl font-bold text-purple-400 mb-2">
+                  {sessionAverage}%
+                </div>
+                <div className="text-lg">Session Average</div>
+                <div className="text-sm text-gray-300 mt-2">
+                  Total: {sessionTotal} pts
+                </div>
               </div>
             </div>
             

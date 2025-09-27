@@ -16,6 +16,7 @@ export interface VideoPosePlayerRef {
   play: () => Promise<void>;
   pause: () => void;
   reset: () => void;
+  getVideoElement: () => HTMLVideoElement | null;
 }
 
 const VideoPosePlayer = React.forwardRef<VideoPosePlayerRef, VideoPosePlayerProps>(({ 
@@ -52,6 +53,9 @@ const VideoPosePlayer = React.forwardRef<VideoPosePlayerRef, VideoPosePlayerProp
         videoRef.current.currentTime = 0;
         videoRef.current.pause();
       }
+    },
+    getVideoElement: () => {
+      return videoRef.current;
     }
   }));
 
