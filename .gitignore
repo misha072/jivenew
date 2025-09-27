@@ -1,0 +1,13 @@
+node_modules/
+npm_debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+.next
+out/
+build/
+
+.DS_Store*
+.env
+.env.local
