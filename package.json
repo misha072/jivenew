@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 {
   "name": "just-dance-clone",
   "version": "0.1.0",
@@ -30,6 +30,4 @@
     "eslint-config-next": "14.0.4"
   }
 }
-=======
 
->>>>>>> main
