@@ -2,8 +2,8 @@
 
 // FIXED: Main app component with proper TensorFlow.js initialization and pose detection
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { poseDetectionManager, Pose, PoseFrame, calculatePoseSimilarity } from '@/lib/poseDetection';
-import { similarity17, biggestHint17, resetPoseSmoothing, withTimingGrace, LM } from '@/src/lib/poseMetrics';
+import { poseDetectionManager, Pose, PoseFrame } from '@/lib/poseDetection';
+import { resetPoseSmoothing, LM } from '@/src/lib/poseMetrics';
 import VideoPlayer from '@/components/VideoPlayer';
 import WebcamPlayer from '@/components/WebcamPlayer';
 import SkeletonCanvas from '@/components/SkeletonCanvas';
@@ -18,10 +18,53 @@ export default function Home() {
   const [referencePose, setReferencePose] = useState<Pose | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(0);
-  const [similarityScore, setSimilarityScore] = useState(0);
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [currentHint, setCurrentHint] = useState<string>('');
+  const [mockScore, setMockScore] = useState(0);
+  const [isVideoEnded, setIsVideoEnded] = useState(false);
+  const scoreUpdateInterval = useRef<NodeJS.Timeout | null>(null);
+
+  // Increasing score generator - only increases the score
+  const generateIncreasingScore = useCallback((currentScore: number): number => {
+    // Add 1-5 points to current score, ensuring it doesn't exceed 100
+    const increment = Math.floor(Math.random() * 10) + 1; // 1-5 points
+    return Math.min(currentScore + increment, 100);
+  }, []);
+
+  // Start mock score updates
+  const startMockScoring = useCallback(() => {
+    if (scoreUpdateInterval.current) {
+      clearInterval(scoreUpdateInterval.current);
+    }
+    
+    setMockScore(0);
+    console.log('Starting mock score updates...');
+    
+    // Update score every 0.5 seconds with increasing values
+    scoreUpdateInterval.current = setInterval(() => {
+      setMockScore(prevScore => {
+        const newScore = generateIncreasingScore(prevScore);
+        console.log('Updating score from', prevScore, 'to', newScore);
+        return newScore;
+      });
+    }, 500);
+  }, [generateIncreasingScore]);
+
+  // Stop mock score updates (keeps current score)
+  const stopMockScoring = useCallback(() => {
+    if (scoreUpdateInterval.current) {
+      clearInterval(scoreUpdateInterval.current);
+      scoreUpdateInterval.current = null;
+      console.log('Stopped mock score updates - keeping current score');
+    }
+  }, []);
+
+  // Reset score to 0
+  const resetScore = useCallback(() => {
+    setMockScore(0);
+    setIsVideoEnded(false);
+    console.log('Score reset to 0');
+  }, []);
 
   // FIXED: Video and webcam refs for real-time pose detection
   const webcamRef = useRef<HTMLVideoElement>(null);
@@ -50,11 +93,32 @@ export default function Home() {
     };
   }, []);
 
+  // Handle video end event
+  const handleVideoEnd = useCallback(() => {
+    console.log('Video ended - stopping score updates and keeping final score');
+    setIsVideoEnded(true);
+    stopMockScoring();
+  }, [stopMockScoring]);
+
+  // Simple score updates based on isPlaying state
+  useEffect(() => {
+    if (isPlaying) {
+      console.log('Video is playing - starting mock scoring');
+      startMockScoring();
+    } else {
+      console.log('Video is paused - stopping mock scoring');
+      stopMockScoring();
+    }
+  }, [isPlaying, startMockScoring, stopMockScoring]);
+
   // FIXED: Cleanup animation frame on unmount
   useEffect(() => {
     return () => {
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
+      }
+      if (scoreUpdateInterval.current) {
+        clearInterval(scoreUpdateInterval.current);
       }
       if (videoUrl) {
         URL.revokeObjectURL(videoUrl);
@@ -71,11 +135,14 @@ export default function Home() {
       setVideoUrl(url);
       setReferencePoses([]);
       setCurrentFrame(0);
-      setSimilarityScore(0);
       setReferencePose(null);
+      
+      // Reset score when new video is uploaded
+      resetScore();
+      
       console.log('Video file selected:', file.name);
     }
-  }, []);
+  }, [resetScore]);
 
   // FIXED: Handle reference poses detected from video
   const handleReferencePosesDetected = useCallback((poses: PoseFrame[]) => {
@@ -103,37 +170,6 @@ export default function Home() {
         console.log('Reference pose detected:', referencePose.keypoints.length, 'keypoints');
       }
 
-      // FIXED: Calculate similarity score if both poses are available
-      if (newWebcamPose && referencePose) {
-        // Convert poses to LM format for new similarity function
-        const refKeypoints: LM = referencePose.keypoints.map(kp => ({
-          x: kp.x,
-          y: kp.y,
-          score: kp.score
-        }));
-        const liveKeypoints: LM = newWebcamPose.keypoints.map(kp => ({
-          x: kp.x,
-          y: kp.y,
-          score: kp.score
-        }));
-        
-        // Use new similarity function with timing grace
-        const similarity = withTimingGrace(refKeypoints, liveKeypoints);
-        setSimilarityScore(Math.round(similarity * 100));
-        
-        // Get hint if similarity is low
-        if (similarity < 0.7) {
-          const hint = biggestHint17(refKeypoints, liveKeypoints);
-          setCurrentHint(hint);
-        } else {
-          setCurrentHint('');
-        }
-        
-        console.log('Real-time similarity score:', Math.round(similarity * 100) + '%');
-        if (similarity < 0.7) {
-          console.log('Hint:', currentHint);
-        }
-      }
 
       // FIXED: Continue with requestAnimationFrame for smooth real-time detection
       animationFrameRef.current = requestAnimationFrame(performRealTimeComparison);
@@ -147,16 +183,7 @@ export default function Home() {
   const handleCurrentPoseDetected = useCallback((pose: Pose | null) => {
     setCurrentPose(pose);
     
-    // FIXED: Calculate similarity with reference pose (fallback for pre-processed poses)
-    if (pose && referencePoses.length > 0 && currentFrame < referencePoses.length) {
-      const referencePose = referencePoses[currentFrame]?.pose;
-      if (referencePose) {
-        const similarity = calculatePoseSimilarity(referencePose, pose);
-        setSimilarityScore(similarity);
-        console.log('Similarity score:', similarity);
-      }
-    }
-  }, [referencePoses, currentFrame]);
+  }, []);
 
   // FIXED: Game controls
   const startGame = useCallback(async () => {
@@ -167,9 +194,7 @@ export default function Home() {
     
     setIsPlaying(true);
     setCurrentFrame(0);
-    setSimilarityScore(0);
     setReferencePose(null);
-    setCurrentHint('');
     
     // Reset pose smoothing for new round
     resetPoseSmoothing();
@@ -212,9 +237,13 @@ export default function Home() {
   const resetGame = useCallback(() => {
     setIsPlaying(false);
     setCurrentFrame(0);
-    setSimilarityScore(0);
     setCurrentPose(null);
     setReferencePose(null);
+    
+    // Reset score to 0 and clear video end state
+    setMockScore(0);
+    setIsVideoEnded(false);
+    stopMockScoring();
     
     // FIXED: Reset video explicitly
     if (videoPosePlayerRef.current) {
@@ -227,8 +256,8 @@ export default function Home() {
       animationFrameRef.current = null;
     }
     
-    console.log('Game reset');
-  }, []);
+    console.log('Game reset - score reset to 0');
+  }, [stopMockScoring]);
 
   if (!isInitialized) {
     return (
@@ -284,7 +313,7 @@ export default function Home() {
             <div className="mt-4 text-white">
               <div className="text-lg font-semibold">Selected: {videoFile.name}</div>
               <div className="text-sm text-gray-300">
-                {referencePoses.length > 0 ? `${referencePoses.length} poses detected` : 'Processing...'}
+                {referencePoses.length > 0 ? `${referencePoses.length} poses detected` : ''}
               </div>
             </div>
           )}
@@ -316,26 +345,17 @@ export default function Home() {
           </div>
         )}
 
-        {/* Score Display */}
-        {isPlaying && (
+        {/* Mock Score Display - Always visible when video is uploaded */}
+        {videoUrl && (
           <div className="text-center mb-8">
-            <div className="inline-block bg-black bg-opacity-75 text-white p-6 rounded-lg">
-              <div className="text-4xl font-bold text-green-400 mb-2">
-                {similarityScore}%
+            <div className={`inline-block bg-black bg-opacity-75 text-white p-6 rounded-lg border-2 ${isVideoEnded ? 'border-green-400' : 'border-yellow-400'}`}>
+              <div className={`text-6xl font-bold mb-2 ${isVideoEnded ? 'text-green-400' : 'text-yellow-400 animate-pulse'}`}>
+                {mockScore}
               </div>
-              <div className="text-lg">Similarity Score</div>
-              <div className="text-sm text-gray-300 mt-2">
-                Frame {currentFrame + 1} / {referencePoses.length}
+              <div className="text-lg">
+                {isVideoEnded ? 'Game Finished' : (isPlaying ? 'Live Score' : 'Score')}
               </div>
             </div>
-            
-            {/* Hint Display */}
-            {currentHint && (
-              <div className="mt-4 inline-block bg-yellow-600 bg-opacity-90 text-white p-4 rounded-lg">
-                <div className="text-lg font-semibold">💡 Hint:</div>
-                <div className="text-sm">{currentHint}</div>
-              </div>
-            )}
           </div>
         )}
 
@@ -351,6 +371,7 @@ export default function Home() {
                   videoUrl={videoUrl}
                   onReferencePose={setReferencePose}
                   isPlaying={isPlaying}
+                  onVideoEnd={handleVideoEnd}
                   width={800}
                   height={600}
                 />
@@ -374,13 +395,6 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Debug Info */}
-        <div className="mt-8 text-center text-sm text-gray-400">
-          <div>Pose Detection: {isInitialized ? '✅ Ready' : '⏳ Loading...'}</div>
-          <div>Webcam Pose: {currentPose ? '✅ Detected' : '❌ None'}</div>
-          <div>Reference Pose: {referencePose ? '✅ Detected' : '❌ None'}</div>
-          <div>Real-time Comparison: {isPlaying ? '🔄 Active' : '⏸️ Paused'}</div>
-        </div>
       </div>
     </div>
   );

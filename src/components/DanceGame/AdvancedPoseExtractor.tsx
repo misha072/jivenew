@@ -2,7 +2,6 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { calculatePoseSimilarity, getDetailedPoseAnalysis } from './AdvancedPoseDetection';
 
 interface PoseLandmark {
   x: number;
@@ -19,12 +18,6 @@ interface DanceFrame {
   confidence: number;
 }
 
-interface PoseComparison {
-  userPose: PoseLandmark[];
-  referencePose: PoseLandmark[];
-  similarity: number;
-  score: number;
-}
 
 export const AdvancedPoseExtractor: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false);
@@ -272,15 +265,6 @@ export const AdvancedPoseExtractor: React.FC = () => {
     return transformedLandmarks;
   };
 
-  const calculateAdvancedPoseSimilarity = (pose1: PoseLandmark[], pose2: PoseLandmark[]): number => {
-    if (pose1.length !== pose2.length) return 0;
-    
-    // Convert to the format expected by advanced detection
-    const landmarks1 = pose1.map(p => ({ x: p.x, y: p.y, score: p.confidence }));
-    const landmarks2 = pose2.map(p => ({ x: p.x, y: p.y, score: p.confidence }));
-    
-    return calculatePoseSimilarity(landmarks1, landmarks2);
-  };
 
   const startAdvancedProcessing = async () => {
     console.log('🚀 Starting advanced processing...');
@@ -332,11 +316,11 @@ export const AdvancedPoseExtractor: React.FC = () => {
       setExtractedFrames(finalFrames);
       
       console.log(`✅ Processing complete! Generated ${finalFrames.length} frames`);
-      console.log(`🎭 Movement types detected:`, [...new Set(finalFrames.map(f => f.moveType))]);
+      console.log(`🎭 Movement types detected:`, Array.from(new Set(finalFrames.map(f => f.moveType))));
       
     } catch (error) {
       console.error('❌ Error during processing:', error);
-      setError(`Processing failed: ${error.message}`);
+      setError(`Processing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsProcessing(false);
     }
@@ -556,7 +540,7 @@ export const AdvancedPoseExtractor: React.FC = () => {
                 <div className="text-center text-gray-400 py-8">
                   <div className="text-4xl mb-2">🎬</div>
                   <p>No frames extracted yet</p>
-                  <p className="text-sm">Click "Extract Poses" to begin analysis</p>
+                  <p className="text-sm">Click &quot;Extract Poses&quot; to begin analysis</p>
                 </div>
               )}
             </div>

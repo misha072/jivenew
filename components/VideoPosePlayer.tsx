@@ -7,6 +7,7 @@ interface VideoPosePlayerProps {
   videoUrl: string;
   onReferencePose: (pose: Pose | null) => void;
   isPlaying: boolean;
+  onVideoEnd?: () => void;
   width?: number;
   height?: number;
 }
@@ -22,6 +23,7 @@ const VideoPosePlayer = React.forwardRef<VideoPosePlayerRef, VideoPosePlayerProp
   videoUrl, 
   onReferencePose, 
   isPlaying,
+  onVideoEnd,
   width = 800,
   height = 600
 }, ref) => {
@@ -69,6 +71,23 @@ const VideoPosePlayer = React.forwardRef<VideoPosePlayerRef, VideoPosePlayerProp
 
     initializeDetection();
   }, []);
+
+  // Handle video end event
+  useEffect(() => {
+    if (!videoRef.current || !onVideoEnd) return;
+
+    const video = videoRef.current;
+    const handleVideoEnd = () => {
+      console.log('VideoPosePlayer: Video ended');
+      onVideoEnd();
+    };
+
+    video.addEventListener('ended', handleVideoEnd);
+
+    return () => {
+      video.removeEventListener('ended', handleVideoEnd);
+    };
+  }, [onVideoEnd]);
 
   // Handle video play/pause based on isPlaying prop
   useEffect(() => {

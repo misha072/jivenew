@@ -1,12 +1,6 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { z } from 'zod';
-import {
-  useRegisterState,
-  useRegisterFrontendTool,
-  useSubscribeStateToAgentContext,
-} from 'cedar-os';
 import { motion } from 'framer-motion';
 import { VideoUpload } from './VideoUpload';
 
@@ -26,86 +20,13 @@ export const DanceVideoProcessor: React.FC<DanceVideoProcessorProps> = ({ classN
   const [extractedMoves, setExtractedMoves] = useState<DanceMove[]>([]);
   const [processingProgress, setProcessingProgress] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [cedarMessages, setCedarMessages] = useState<string[]>([]);
   const [demoVideoLoaded, setDemoVideoLoaded] = useState(false);
 
-  // Register state with Cedar
-  useRegisterState({
-    key: 'danceVideoState',
-    description: 'State of the dance video processing including extracted moves and progress',
-    value: {
-      videoFile: videoFile?.name || '',
-      isProcessing,
-      extractedMovesCount: extractedMoves.length,
-      progress: processingProgress
-    },
-    setValue: (newValue: any) => {
-      // Handle state updates if needed
-    },
-    stateSetters: {
-      startProcessing: {
-        name: 'startProcessing',
-        description: 'Start processing the uploaded dance video to extract movements',
-        argsSchema: z.object({}),
-        execute: (currentState: any, setValue: any, args: {}) => {
-          if (videoFile) {
-            setIsProcessing(true);
-            setProcessingProgress(0);
-            setCedarMessages(prev => [...prev, '🎬 Starting to process dance video...']);
-            processVideo();
-          }
-        },
-      },
-      clearResults: {
-        name: 'clearResults',
-        description: 'Clear the extracted dance moves and reset the processor',
-        argsSchema: z.object({}),
-        execute: (currentState: any, setValue: any, args: {}) => {
-          setExtractedMoves([]);
-          setVideoFile(null);
-          setIsProcessing(false);
-          setProcessingProgress(0);
-          setCedarMessages(prev => [...prev, '🗑️ Results cleared. Ready for a new video.']);
-        },
-      }
-    },
-  });
-
-  // Subscribe state to Cedar context
-  useSubscribeStateToAgentContext('danceVideoState', (state) => ({ danceVideoState: state }), {
-    showInChat: true,
-    color: '#8B5CF6',
-  });
-
-  // Cedar frontend tools
-  useRegisterFrontendTool({
-    name: 'loadDemoVideo',
-    description: 'Load the demo dance video for processing',
-    argsSchema: z.object({}),
-    execute: async (args: {}) => {
-      await loadDemoVideo();
-      return 'Demo video loaded successfully!';
-    },
-  });
-
-  useRegisterFrontendTool({
-    name: 'analyzeExtractedMoves',
-    description: 'Analyze the extracted dance moves and provide insights',
-    argsSchema: z.object({
-      analysis: z.string().describe('Analysis of the extracted dance moves'),
-      suggestions: z.string().optional().describe('Suggestions for improving the dance')
-    }),
-    execute: async (args: { analysis: string; suggestions?: string }) => {
-      const message = `📊 Dance Analysis: ${args.analysis}${args.suggestions ? `\n💡 Suggestions: ${args.suggestions}` : ''}`;
-      setCedarMessages(prev => [...prev, message]);
-    },
-  });
 
   const handleVideoUpload = (file: File) => {
     setVideoFile(file);
     setExtractedMoves([]);
     setProcessingProgress(0);
-    setCedarMessages(prev => [...prev, `📹 Video uploaded: ${file.name}`]);
   };
 
   const loadDemoVideo = async () => {
@@ -116,12 +37,9 @@ export const DanceVideoProcessor: React.FC<DanceVideoProcessorProps> = ({ classN
         const file = new File([blob], 'dancevideo.mp4', { type: 'video/mp4' });
         setVideoFile(file);
         setDemoVideoLoaded(true);
-        setCedarMessages(prev => [...prev, '🎬 Demo video loaded: dancevideo.mp4']);
-      } else {
-        setCedarMessages(prev => [...prev, '❌ Demo video not found. Please upload a video file.']);
       }
     } catch (error) {
-      setCedarMessages(prev => [...prev, '❌ Error loading demo video. Please upload a video file.']);
+      console.error('Error loading demo video:', error);
     }
   };
 
@@ -155,11 +73,11 @@ export const DanceVideoProcessor: React.FC<DanceVideoProcessorProps> = ({ classN
       }
       
       setIsProcessing(false);
-      setCedarMessages(prev => [...prev, `✅ Processing complete! Extracted ${extractedMoves.length} dance moves.`]);
+      console.log(`✅ Processing complete! Extracted ${extractedMoves.length} dance moves.`);
       
     } catch (error) {
       setIsProcessing(false);
-      setCedarMessages(prev => [...prev, `❌ Error processing video: ${error}`]);
+      console.error(`❌ Error processing video: ${error}`);
     }
   };
 
@@ -176,12 +94,12 @@ export const DanceVideoProcessor: React.FC<DanceVideoProcessorProps> = ({ classN
   const playExtractedMoves = () => {
     if (extractedMoves.length === 0) return;
     
-    setCedarMessages(prev => [...prev, `🎵 Playing back ${extractedMoves.length} extracted dance moves!`]);
+    console.log(`🎵 Playing back ${extractedMoves.length} extracted dance moves!`);
     
     // Simulate playing back the moves
     extractedMoves.forEach((move, index) => {
       setTimeout(() => {
-        setCedarMessages(prev => [...prev, `🎭 ${move.moveName} at ${move.timestamp}ms`]);
+        console.log(`🎭 ${move.moveName} at ${move.timestamp}ms`);
       }, index * 1000);
     });
   };
@@ -203,26 +121,6 @@ export const DanceVideoProcessor: React.FC<DanceVideoProcessorProps> = ({ classN
             Upload your dance video and extract movements with AI
           </p>
           
-          {/* Cedar Messages Display */}
-          {cedarMessages.length > 0 && (
-            <div className="max-w-4xl mx-auto mb-6">
-              <div className="bg-black bg-opacity-50 rounded-lg p-4 max-h-32 overflow-y-auto">
-                <h3 className="text-lg font-semibold text-purple-300 mb-2">💬 Cedar's Updates:</h3>
-                <div className="space-y-1">
-                  {cedarMessages.slice(-3).map((message, index) => (
-                    <motion.div
-                      key={index}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="text-sm text-white"
-                    >
-                      {message}
-                    </motion.div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -290,7 +188,6 @@ export const DanceVideoProcessor: React.FC<DanceVideoProcessorProps> = ({ classN
                       onClick={() => {
                         setIsProcessing(true);
                         setProcessingProgress(0);
-                        setCedarMessages(prev => [...prev, '🎬 Starting to process dance video...']);
                         processVideo();
                       }}
                       disabled={isProcessing}
@@ -355,7 +252,7 @@ export const DanceVideoProcessor: React.FC<DanceVideoProcessorProps> = ({ classN
                 <div className="text-center text-gray-400 py-8">
                   <div className="text-4xl mb-2">📹</div>
                   <p>No moves extracted yet</p>
-                  <p className="text-sm">Upload a video and click "Extract Dance Moves"</p>
+                  <p className="text-sm">Upload a video and click &quot;Extract Dance Moves&quot;</p>
                 </div>
               )}
             </motion.div>

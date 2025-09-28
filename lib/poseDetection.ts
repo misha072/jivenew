@@ -121,31 +121,3 @@ class PoseDetectionManager {
 
 // FIXED: Singleton instance to avoid multiple initializations
 export const poseDetectionManager = new PoseDetectionManager();
-
-// FIXED: Pose similarity calculation
-export function calculatePoseSimilarity(pose1: Pose, pose2: Pose): number {
-  if (!pose1.keypoints || !pose2.keypoints) return 0;
-  
-  let totalDistance = 0;
-  let validPoints = 0;
-  
-  for (let i = 0; i < Math.min(pose1.keypoints.length, pose2.keypoints.length); i++) {
-    const kp1 = pose1.keypoints[i];
-    const kp2 = pose2.keypoints[i];
-    
-    if (kp1.score > 0.3 && kp2.score > 0.3) {
-      const distance = Math.sqrt(
-        Math.pow(kp1.x - kp2.x, 2) + Math.pow(kp1.y - kp2.y, 2)
-      );
-      totalDistance += distance;
-      validPoints++;
-    }
-  }
-  
-  if (validPoints === 0) return 0;
-  
-  const averageDistance = totalDistance / validPoints;
-  const similarity = Math.max(0, 100 - (averageDistance / 100) * 100);
-  
-  return Math.round(similarity);
-}

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
 import { createDetector, SupportedModels, PoseDetector } from '@tensorflow-models/pose-detection';
-import { Pose, PoseFrame } from '@/lib/poseUtils';
+import { Pose, PoseFrame } from '@/lib/poseDetection';
 
 interface UsePoseDetectorReturn {
   detector: PoseDetector | null;
@@ -55,7 +55,17 @@ export function usePoseDetector(): UsePoseDetectorReturn {
     try {
       setIsDetecting(true);
       const poses = await detector.estimatePoses(videoElement);
-      return poses;
+      
+      // Convert TensorFlow.js poses to our custom Pose format
+      return poses.map(pose => ({
+        keypoints: pose.keypoints.map(kp => ({
+          x: kp.x,
+          y: kp.y,
+          score: kp.score || 0, // Ensure score is always a number
+          name: kp.name
+        })),
+        score: pose.score || 0
+      }));
     } catch (err) {
       console.error('Error detecting poses:', err);
       setError(err instanceof Error ? err.message : 'Error detecting poses');
@@ -71,7 +81,17 @@ export function usePoseDetector(): UsePoseDetectorReturn {
     try {
       setIsDetecting(true);
       const poses = await detector.estimatePoses(imageElement);
-      return poses;
+      
+      // Convert TensorFlow.js poses to our custom Pose format
+      return poses.map(pose => ({
+        keypoints: pose.keypoints.map(kp => ({
+          x: kp.x,
+          y: kp.y,
+          score: kp.score || 0, // Ensure score is always a number
+          name: kp.name
+        })),
+        score: pose.score || 0
+      }));
     } catch (err) {
       console.error('Error detecting poses from image:', err);
       setError(err instanceof Error ? err.message : 'Error detecting poses from image');

@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { initMoveNet, getKeypoints } from './pose/detector';
-import { similarity17, biggestHint17, resetPoseSmoothing } from './scoring/movenet17';
+import { resetPoseSmoothing } from './scoring/movenet17';
 
 interface DebugInfo {
   fps: number;
   keypoints: number;
   confidence: number;
-  similarity: number;
-  hint: string;
   isDetecting: boolean;
   armStatus: {
     left: boolean;
@@ -22,8 +20,6 @@ export default function DebugPoseHarness() {
     fps: 0, 
     keypoints: 0, 
     confidence: 0, 
-    similarity: 0, 
-    hint: "No pose detected",
     isDetecting: false,
     armStatus: { left: false, right: false }
   });
@@ -101,32 +97,11 @@ export default function DebugPoseHarness() {
           }
         });
 
-        // Calculate similarity and hints if we have a reference pose
-        let similarity = 0;
-        let hint = "No reference pose";
+        // Simple arm detection for status
         let armStatus = { left: false, right: false };
-
-        if (referencePose) {
-          try {
-            // Convert MoveNet keypoints to our format
-            const livePose = kp.map(kp => ({
-              x: kp.x / c.width, // Normalize to 0-1
-              y: kp.y / c.height,
-              score: kp.score
-            }));
-
-            similarity = similarity17(referencePose, livePose);
-            hint = biggestHint17(referencePose, livePose);
-            
-            // Simple arm detection for status
-            const leftArmUp = (kp[7]?.score ?? 0) > 0.4 && kp[7].y < kp[5].y;
-            const rightArmUp = (kp[8]?.score ?? 0) > 0.4 && kp[8].y < kp[6].y;
-            armStatus = { left: leftArmUp, right: rightArmUp };
-          } catch (error) {
-            console.error("Pose analysis error:", error);
-            hint = "Analysis error";
-          }
-        }
+        const leftArmUp = (kp[7]?.score ?? 0) > 0.4 && kp[7].y < kp[5].y;
+        const rightArmUp = (kp[8]?.score ?? 0) > 0.4 && kp[8].y < kp[6].y;
+        armStatus = { left: leftArmUp, right: rightArmUp };
 
         // Calculate average confidence
         const avgConf = kp.reduce((s, p) => s + (p.score ?? 0), 0) / kp.length;
@@ -135,8 +110,6 @@ export default function DebugPoseHarness() {
           ...prev,
           keypoints: kp.length,
           confidence: Number(avgConf.toFixed(2)),
-          similarity: Number(similarity.toFixed(3)),
-          hint,
           isDetecting: true,
           armStatus
         }));
@@ -145,8 +118,6 @@ export default function DebugPoseHarness() {
           ...prev,
           keypoints: 0,
           confidence: 0,
-          similarity: 0,
-          hint: "No pose detected",
           isDetecting: false,
           armStatus: { left: false, right: false }
         }));
@@ -155,7 +126,6 @@ export default function DebugPoseHarness() {
       console.error("Pose detection error:", error);
       setInfo(prev => ({
         ...prev,
-        hint: "Detection error",
         isDetecting: false
       }));
     }
@@ -254,9 +224,7 @@ export default function DebugPoseHarness() {
           </div>
 
           <div style={{ background: "#1a1a1a", padding: 12, borderRadius: 8 }}>
-            <h3 style={{ margin: "0 0 8px 0", color: "#00ff88" }}>🎯 Scoring Analysis</h3>
-            <div>Similarity: <span style={{ color: info.similarity > 0.7 ? "#00ff88" : info.similarity > 0.4 ? "#ffaa00" : "#ff6666" }}>{info.similarity}</span></div>
-            <div>Hint: <span style={{ color: "#00aaff" }}>{info.hint}</span></div>
+            <h3 style={{ margin: "0 0 8px 0", color: "#00ff88" }}>🎯 Pose Analysis</h3>
             <div>Left Arm: <span style={{ color: info.armStatus.left ? "#00ff88" : "#ff6666" }}>{info.armStatus.left ? "UP" : "DOWN"}</span></div>
             <div>Right Arm: <span style={{ color: info.armStatus.right ? "#00ff88" : "#ff6666" }}>{info.armStatus.right ? "UP" : "DOWN"}</span></div>
           </div>
@@ -286,8 +254,7 @@ export default function DebugPoseHarness() {
         <div>• <strong>FPS ≈ 0:</strong> Detector/loop isn&apos;t working</div>
         <div>• <strong>Keypoints = 0:</strong> No pose detected (check lighting/position)</div>
         <div>• <strong>Confidence &lt; 0.7:</strong> Poor pose detection quality</div>
-        <div>• <strong>Similarity not changing:</strong> Reference pose or scoring logic issue</div>
-        <div>• <strong>Hint not updating:</strong> Pose analysis not working</div>
+        <div>• <strong>Arm status not updating:</strong> Pose detection or analysis issue</div>
         <div>• <strong>Green skeleton:</strong> Pose detection working ✅</div>
         <div>• <strong>Red skeleton:</strong> Low confidence keypoints</div>
       </div>

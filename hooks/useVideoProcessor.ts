@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Pose, PoseFrame } from '@/lib/poseUtils';
+import { Pose, PoseFrame } from '@/lib/poseDetection';
 import { usePoseDetector } from './usePoseDetector';
 
 interface UseVideoProcessorReturn {

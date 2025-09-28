@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { calculatePoseSimilarity, getBiggestHint, getDetailedPoseAnalysis, resetPoseSmoothing } from './AdvancedPoseDetection';
+import { resetPoseSmoothing } from './AdvancedPoseDetection';
 
 interface PoseLandmark {
   x: number;
@@ -19,17 +19,13 @@ interface DanceFrame {
   confidence: number;
 }
 
-interface ScoreData {
-  totalScore: number;
+interface MockScoreData {
   currentScore: number;
-  perfectHits: number;
-  goodHits: number;
-  okHits: number;
-  misses: number;
-  streak: number;
-  accuracy: number;
-  currentMove: string;
+  isActive: boolean;
+  startTime: number;
+  videoDuration: number;
 }
+
 
 export const LiveDanceGame: React.FC = () => {
   const [isGameActive, setIsGameActive] = useState(false);
@@ -38,23 +34,77 @@ export const LiveDanceGame: React.FC = () => {
   const [userPose, setUserPose] = useState<PoseLandmark[] | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [isGameReady, setIsGameReady] = useState(false);
-  const [poseHint, setPoseHint] = useState<string>('');
-  const [detailedAnalysis, setDetailedAnalysis] = useState<any>(null);
-  const [scoreData, setScoreData] = useState<ScoreData>({
-    totalScore: 0,
+  const [mockScore, setMockScore] = useState<MockScoreData>({
     currentScore: 0,
-    perfectHits: 0,
-    goodHits: 0,
-    okHits: 0,
-    misses: 0,
-    streak: 0,
-    accuracy: 0,
-    currentMove: ''
+    isActive: false,
+    startTime: 0,
+    videoDuration: 15
   });
+  const [isVideoEnded, setIsVideoEnded] = useState(false);
   
   const referenceVideoRef = useRef<HTMLVideoElement>(null);
   const animationRef = useRef<number | null>(null);
   const gameStartTime = useRef<number>(0);
+  const scoreUpdateInterval = useRef<NodeJS.Timeout | null>(null);
+
+  // Increasing score generator - only increases the score
+  const generateIncreasingScore = useCallback((currentScore: number): number => {
+    // Add 1-5 points to current score, ensuring it doesn't exceed 100
+    const increment = Math.floor(Math.random() * 5) + 1; // 1-5 points
+    return Math.min(currentScore + increment, 100);
+  }, []);
+
+  // Start mock score updates
+  const startMockScoring = useCallback(() => {
+    if (scoreUpdateInterval.current) {
+      clearInterval(scoreUpdateInterval.current);
+    }
+    
+    setMockScore(prev => ({
+      ...prev,
+      isActive: true,
+      currentScore: 0
+    }));
+    
+    console.log('Starting mock score updates in LiveDanceGame...');
+    
+    // Update score every 0.5 seconds with increasing values
+    scoreUpdateInterval.current = setInterval(() => {
+      setMockScore(prev => {
+        const newScore = generateIncreasingScore(prev.currentScore);
+        console.log('LiveDanceGame updating score from', prev.currentScore, 'to', newScore);
+        return {
+          ...prev,
+          currentScore: newScore
+        };
+      });
+    }, 500);
+  }, [generateIncreasingScore]);
+
+  // Stop mock score updates (keeps current score)
+  const stopMockScoring = useCallback(() => {
+    if (scoreUpdateInterval.current) {
+      clearInterval(scoreUpdateInterval.current);
+      scoreUpdateInterval.current = null;
+      console.log('Stopped mock score updates in LiveDanceGame - keeping current score');
+    }
+    
+    setMockScore(prev => ({
+      ...prev,
+      isActive: false
+    }));
+  }, []);
+
+  // Reset score to 0
+  const resetScore = useCallback(() => {
+    setMockScore(prev => ({
+      ...prev,
+      currentScore: 0,
+      isActive: false
+    }));
+    setIsVideoEnded(false);
+    console.log('Score reset to 0 in LiveDanceGame');
+  }, []);
 
   // Generate reference dance frames with 0.5 second intervals for accuracy
   const generateReferenceFrames = useCallback(() => {
@@ -220,93 +270,11 @@ export const LiveDanceGame: React.FC = () => {
   };
 
 
-  // Use advanced pose similarity calculation
-  const calculateAdvancedPoseSimilarity = useCallback((pose1: PoseLandmark[], pose2: PoseLandmark[]): number => {
-    if (pose1.length !== pose2.length) return 0;
-    
-    // Convert to the format expected by advanced detection
-    const landmarks1 = pose1.map(p => ({ x: p.x, y: p.y, score: p.confidence }));
-    const landmarks2 = pose2.map(p => ({ x: p.x, y: p.y, score: p.confidence }));
-    
-    return calculatePoseSimilarity(landmarks1, landmarks2);
-  }, []);
-
-  // Update score based on pose comparison
-  const updateScore = useCallback((userPose: PoseLandmark[], referencePose: PoseLandmark[], moveType: string) => {
-    const similarity = calculateAdvancedPoseSimilarity(userPose, referencePose);
-    
-    // Get detailed analysis and hints
-    const landmarks1 = userPose.map(p => ({ x: p.x, y: p.y, score: p.confidence }));
-    const landmarks2 = referencePose.map(p => ({ x: p.x, y: p.y, score: p.confidence }));
-    const analysis = getDetailedPoseAnalysis(landmarks2, landmarks1);
-    
-    setPoseHint(analysis.biggestHint);
-    setDetailedAnalysis(analysis);
-    
-    let hitType: 'perfect' | 'good' | 'ok' | 'miss';
-    let points = 0;
-
-    if (similarity >= 0.85) {
-      hitType = 'perfect';
-      points = 100;
-    } else if (similarity >= 0.7) {
-      hitType = 'good';
-      points = 50;
-    } else if (similarity >= 0.5) {
-      hitType = 'ok';
-      points = 25;
-    } else {
-      hitType = 'miss';
-      points = 0;
-    }
-
-    setScoreData(prev => {
-      const newScore = { ...prev };
-      
-      // Add points with combo multiplier
-      const comboMultiplier = Math.min(1 + (newScore.streak * 0.1), 3);
-      newScore.totalScore += Math.floor(points * comboMultiplier);
-      newScore.currentScore = Math.floor(points * comboMultiplier);
-      
-      // Update hit counts
-      if (hitType === 'perfect') {
-        newScore.perfectHits += 1;
-      } else if (hitType === 'good') {
-        newScore.goodHits += 1;
-      } else if (hitType === 'ok') {
-        newScore.okHits += 1;
-      } else if (hitType === 'miss') {
-        newScore.misses += 1;
-      }
-      
-      // Update streak
-      if (hitType !== 'miss') {
-        newScore.streak++;
-      } else {
-        newScore.streak = 0;
-      }
-      
-      // Calculate accuracy
-      const totalAttempts = newScore.perfectHits + newScore.goodHits + newScore.okHits + newScore.misses;
-      newScore.accuracy = totalAttempts > 0 ? 
-        ((newScore.perfectHits + newScore.goodHits + newScore.okHits) / totalAttempts) * 100 : 0;
-      
-      newScore.currentMove = moveType;
-      
-      return newScore;
-    });
-  }, [calculatePoseSimilarity]);
 
   // Handle real pose detection from TensorFlow
   const handleRealPoseDetection = useCallback((landmarks: PoseLandmark[]) => {
     setUserPose(landmarks);
-    
-    // If game is active and we have reference frames, compare immediately
-    if (isGameActive && landmarks.length > 0 && referenceFrames[currentFrame]) {
-      const currentRefFrame = referenceFrames[currentFrame];
-      updateScore(landmarks, currentRefFrame.landmarks, currentRefFrame.moveType);
-    }
-  }, [isGameActive, currentFrame, referenceFrames, updateScore]);
+  }, []);
 
   // Detect user movement - now uses real pose detection
   const detectUserMovement = useCallback(() => {
@@ -340,17 +308,6 @@ export const LiveDanceGame: React.FC = () => {
           setReferenceFrames(frames);
           setIsGameActive(true);
           setCurrentFrame(0);
-          setScoreData({
-            totalScore: 0,
-            currentScore: 0,
-            perfectHits: 0,
-            goodHits: 0,
-            okHits: 0,
-            misses: 0,
-            streak: 0,
-            accuracy: 0,
-            currentMove: ''
-          });
           gameStartTime.current = Date.now();
           
           // Reset pose smoothing for new game
@@ -383,23 +340,24 @@ export const LiveDanceGame: React.FC = () => {
     setIsGameReady(false);
     setCountdown(null);
     setCurrentFrame(0);
-    setScoreData({
-      totalScore: 0,
+    
+    // Reset score to 0 and clear video end state
+    setMockScore(prev => ({
+      ...prev,
       currentScore: 0,
-      perfectHits: 0,
-      goodHits: 0,
-      okHits: 0,
-      misses: 0,
-      streak: 0,
-      accuracy: 0,
-      currentMove: ''
-    });
+      isActive: false
+    }));
+    setIsVideoEnded(false);
+    stopMockScoring();
+    
     // Stop reference video
     if (referenceVideoRef.current) {
       referenceVideoRef.current.pause();
       referenceVideoRef.current.currentTime = 0;
     }
-  }, []);
+    
+    console.log('Game reset - score reset to 0');
+  }, [stopMockScoring]);
 
   // Game loop - 0.5 second intervals for more accurate tracking
   useEffect(() => {
@@ -414,27 +372,6 @@ export const LiveDanceGame: React.FC = () => {
       
       // Detect user movement and generate pose
       const detectedPose = detectUserMovement();
-      
-      // Compare with reference pose - update score more frequently
-      if (detectedPose && referenceFrames[frameIndex]) {
-        updateScore(detectedPose, referenceFrames[frameIndex].landmarks, referenceFrames[frameIndex].moveType);
-      } else if (referenceFrames[frameIndex]) {
-        // No movement detected - give 0 points (miss)
-        setScoreData(prev => {
-          const newScore = { ...prev };
-          newScore.misses += 1;
-          newScore.streak = 0;
-          newScore.currentScore = 0;
-          newScore.currentMove = referenceFrames[frameIndex].moveType;
-          
-          // Calculate accuracy
-          const totalAttempts = newScore.perfectHits + newScore.goodHits + newScore.okHits + newScore.misses;
-          newScore.accuracy = totalAttempts > 0 ? 
-            ((newScore.perfectHits + newScore.goodHits + newScore.okHits) / totalAttempts) * 100 : 0;
-          
-          return newScore;
-        });
-      }
       
       // Check if game is over
       if (frameIndex >= referenceFrames.length - 1) {
@@ -452,13 +389,45 @@ export const LiveDanceGame: React.FC = () => {
         cancelAnimationFrame(animationRef.current);
       }
     };
-  }, [isGameActive, referenceFrames, detectUserMovement, updateScore]);
+  }, [isGameActive, referenceFrames, detectUserMovement]);
+
+  // Video end detection for final score - using video ended event
+  useEffect(() => {
+    const video = referenceVideoRef.current;
+    if (!video) return;
+
+    const handleVideoEnd = () => {
+      console.log('Video ended - stopping score updates and keeping final score');
+      setIsVideoEnded(true);
+      stopMockScoring();
+    };
+
+    video.addEventListener('ended', handleVideoEnd);
+
+    return () => {
+      video.removeEventListener('ended', handleVideoEnd);
+    };
+  }, [stopMockScoring]);
+
+  // Simple score updates based on game active state
+  useEffect(() => {
+    if (isGameActive) {
+      console.log('Game is active - starting mock scoring');
+      startMockScoring();
+    } else {
+      console.log('Game is not active - stopping mock scoring');
+      stopMockScoring();
+    }
+  }, [isGameActive, startMockScoring, stopMockScoring]);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
+      }
+      if (scoreUpdateInterval.current) {
+        clearInterval(scoreUpdateInterval.current);
       }
     };
   }, []);
@@ -526,7 +495,7 @@ export const LiveDanceGame: React.FC = () => {
             🎮 Live Dance Game
           </h1>
           <p className="text-xl text-gray-300">
-            Dance along with the reference video and get real-time scoring!
+            Dance along with the reference video and see your pose mapping in real-time!
           </p>
         </motion.div>
 
@@ -581,16 +550,6 @@ export const LiveDanceGame: React.FC = () => {
 
           {/* Game Status */}
           <div className="text-center text-gray-300">
-            {!isGameActive && !isGameReady && (
-              <p className="text-lg">
-                Click "Play Game!" to start frame-by-frame dance analysis!
-              </p>
-            )}
-            {isGameActive && (
-              <p className="text-lg text-green-400">
-                🎉 Analyzing dance moves frame by frame!
-              </p>
-            )}
           </div>
         </div>
 
@@ -617,7 +576,7 @@ export const LiveDanceGame: React.FC = () => {
               )}
               {isGameActive && (
                 <div className="absolute bottom-4 left-4 bg-black bg-opacity-70 text-white px-3 py-1 rounded text-sm">
-                  {referenceFrames[currentFrame]?.moveType || 'Loading...'}
+                  {referenceFrames[currentFrame]?.moveType || ''}
                 </div>
               )}
             </div>
@@ -627,38 +586,18 @@ export const LiveDanceGame: React.FC = () => {
           <div className="bg-gray-800 rounded-xl p-6">
             <h2 className="text-2xl font-bold text-white mb-4">Movement Analysis</h2>
             <div className="relative aspect-video bg-gradient-to-br from-purple-900 to-blue-900 rounded-lg overflow-hidden flex items-center justify-center">
-              {isGameActive ? (
+              {(isGameActive || isVideoEnded || isGameReady) ? (
                 <div className="text-center text-white">
-                  <div className="text-6xl mb-4">🎭</div>
-                  <div className="text-xl font-bold mb-2">Frame-by-Frame Analysis</div>
-                  <div className="text-lg text-purple-200">
-                    Frame {currentFrame + 1}/{referenceFrames.length} • {Math.round((currentFrame / referenceFrames.length) * 100)}% Complete
+                  <div className={`text-6xl font-bold mb-4 ${isVideoEnded ? 'text-green-400' : 'text-yellow-400'}`}>
+                    {mockScore.currentScore}
                   </div>
-                  <div className="mt-4 flex gap-4 justify-center">
-                    <div className="bg-green-600 bg-opacity-80 text-white px-4 py-2 rounded text-sm font-bold">
-                      🎯 Score: {scoreData.totalScore}
-                    </div>
-                    {scoreData.streak > 0 && (
-                      <div className="bg-yellow-600 bg-opacity-80 text-white px-4 py-2 rounded text-sm font-bold">
-                        🔥 Streak: {scoreData.streak}
-                      </div>
-                    )}
+                  <div className="text-xl font-bold mb-2">
+                    {isVideoEnded ? 'Game Finished' : (isGameActive ? 'Live Score' : 'Score')}
                   </div>
-                  
-                  {/* Pose Hint */}
-                  {poseHint && (
-                    <div className="mt-4 bg-blue-600 bg-opacity-80 text-white px-4 py-2 rounded text-sm font-bold">
-                      💡 Hint: {poseHint}
-                    </div>
-                  )}
                 </div>
               ) : (
                 <div className="text-center text-gray-400">
                   <div className="text-6xl mb-4">🎬</div>
-                  <div className="text-xl font-bold mb-2">Ready for Analysis?</div>
-                  <div className="text-lg">
-                    Click "Play Game!" to start frame-by-frame analysis!
-                  </div>
                 </div>
               )}
             </div>
@@ -688,7 +627,7 @@ export const LiveDanceGame: React.FC = () => {
                 color="#FF6B6B"
               />
               <div className="mt-2 text-sm text-gray-300">
-                Similarity: {calculatePoseSimilarity(userPose, referenceFrames[currentFrame].landmarks).toFixed(3)}
+                Live Detection
               </div>
             </div>
           </div>
@@ -732,97 +671,35 @@ export const LiveDanceGame: React.FC = () => {
           </motion.div>
         )}
 
-        {/* Live Score Display */}
-        {isGameActive && (
+        {/* Final Score Display */}
+        {!isGameActive && mockScore.currentScore > 0 && (
           <motion.div
-            className="bg-gray-800 rounded-xl p-6"
-            initial={{ y: 20, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-          >
-            <h3 className="text-2xl font-bold text-white mb-4">Live Score</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="text-center">
-                <div className="text-3xl font-bold text-yellow-400">{scoreData.totalScore}</div>
-                <div className="text-sm text-gray-400">Total Score</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-400">{scoreData.currentScore}</div>
-                <div className="text-sm text-gray-400">Current Points</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-blue-400">{scoreData.streak}</div>
-                <div className="text-sm text-gray-400">Streak</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-purple-400">{scoreData.accuracy.toFixed(1)}%</div>
-                <div className="text-sm text-gray-400">Accuracy</div>
-              </div>
-            </div>
-            
-            {/* Hit Breakdown */}
-            <div className="mt-6">
-              <div className="grid grid-cols-4 gap-2 text-center">
-                <div>
-                  <div className="text-lg font-bold text-yellow-400">{scoreData.perfectHits}</div>
-                  <div className="text-xs text-gray-400">Perfect</div>
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-green-400">{scoreData.goodHits}</div>
-                  <div className="text-xs text-gray-400">Good</div>
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-blue-400">{scoreData.okHits}</div>
-                  <div className="text-xs text-gray-400">OK</div>
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-red-400">{scoreData.misses}</div>
-                  <div className="text-xs text-gray-400">Miss</div>
-                </div>
-              </div>
-            </div>
-            
-            {scoreData.currentMove && (
-              <div className="mt-4 text-center">
-                <div className="text-lg font-semibold text-white">
-                  Current Move: <span className="text-purple-400">{scoreData.currentMove}</span>
-                </div>
-              </div>
-            )}
-          </motion.div>
-        )}
-
-        {/* Final Score */}
-        {!isGameActive && scoreData.totalScore > 0 && (
-          <motion.div
-            className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl p-8 text-center"
+            className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl p-8 text-center mb-6"
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.5 }}
           >
             <h2 className="text-4xl font-bold text-white mb-4">🎉 Dance Complete! 🎉</h2>
-            <div className="text-6xl font-bold text-yellow-300 mb-4">{scoreData.totalScore.toLocaleString()}</div>
+            <div className="text-6xl font-bold text-yellow-300 mb-4">{mockScore.currentScore}</div>
             <div className="text-xl text-white mb-6">Final Score</div>
             
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-white">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-white">
               <div>
-                <div className="text-2xl font-bold">{scoreData.perfectHits}</div>
-                <div className="text-sm">Perfect Hits</div>
+                <div className="text-2xl font-bold">{mockScore.currentScore >= 90 ? 'A+' : mockScore.currentScore >= 80 ? 'A' : mockScore.currentScore >= 70 ? 'B' : mockScore.currentScore >= 60 ? 'C' : 'D'}</div>
+                <div className="text-sm">Grade</div>
               </div>
               <div>
-                <div className="text-2xl font-bold">{scoreData.goodHits}</div>
-                <div className="text-sm">Good Hits</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold">{scoreData.accuracy.toFixed(1)}%</div>
+                <div className="text-2xl font-bold">{Math.round((mockScore.currentScore / 100) * 100)}%</div>
                 <div className="text-sm">Accuracy</div>
               </div>
               <div>
-                <div className="text-2xl font-bold">{scoreData.streak}</div>
-                <div className="text-sm">Best Streak</div>
+                <div className="text-2xl font-bold">🎭</div>
+                <div className="text-sm">Pose Mapping</div>
               </div>
             </div>
           </motion.div>
         )}
+
       </div>
     </div>
   );
