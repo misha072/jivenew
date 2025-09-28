@@ -9,6 +9,14 @@ import WebcamPlayer from '@/components/WebcamPlayer';
 import SkeletonCanvas from '@/components/SkeletonCanvas';
 import VideoPosePlayer, { VideoPosePlayerRef } from '@/components/VideoPosePlayer';
 
+// Coach overlay + logic
+import { CoachFeedbackOverlay, useCoachFeedback } from '@/components/CoachFeedback';
+import { useDanceCoach } from '@/hooks/useDanceCoach';
+
+// Cedar integration hooks
+import { z } from 'zod';
+import { useRegisterFrontendTool, useSubscribeStateToAgentContext } from 'cedar-os';
+
 export default function Home() {
   // State management
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -23,6 +31,23 @@ export default function Home() {
   const [mockScore, setMockScore] = useState(0);
   const [isVideoEnded, setIsVideoEnded] = useState(false);
   const scoreUpdateInterval = useRef<NodeJS.Timeout | null>(null);
+
+  // Coach overlay state
+  const [coachMessages, coachApi] = useCoachFeedback();
+
+  // Cedar: register a UI tool so the agent can push tips into the overlay
+  useRegisterFrontendTool({
+    name: 'showCoachFeedback',
+    description: 'Show a coaching tip in the UI overlay',
+    argsSchema: z.object({
+      text: z.string().min(1, 'Text cannot be empty'),
+      tone: z.enum(['encouragement', 'tip', 'celebration', 'warning']).optional(),
+    }),
+    execute: async (args: { text: string; tone?: 'encouragement' | 'tip' | 'celebration' | 'warning' }) => {
+      coachApi.push({ text: args.text, tone: args.tone });
+      return { ok: true } as const;
+    },
+  });
 
   // Increasing score generator - only increases the score
   const generateIncreasingScore = useCallback((currentScore: number): number => {
@@ -110,6 +135,25 @@ export default function Home() {
       stopMockScoring();
     }
   }, [isPlaying, startMockScoring, stopMockScoring]);
+
+  // Real-time coaching: derive feedback from score trend
+  useDanceCoach({
+    score: mockScore,
+    isPlaying,
+    onFeedback: coachApi.push,
+  });
+
+  // Cedar: subscribe runtime game state so the agent is aware and can decide to call tools
+  useSubscribeStateToAgentContext(
+    'danceGame',
+    () => ({
+      score: mockScore,
+      isPlaying,
+      videoLoaded: !!videoFile,
+      isVideoEnded,
+    }),
+    { showInChat: true, color: '#10B981' }
+  );
 
   // FIXED: Cleanup animation frame on unmount
   useEffect(() => {
@@ -291,6 +335,9 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-6">
+      {/* AI Coach overlay */}
+      <CoachFeedbackOverlay messages={coachMessages} />
+
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="text-center mb-8">
