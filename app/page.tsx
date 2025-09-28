@@ -8,6 +8,9 @@ import VideoPlayer from '@/components/VideoPlayer';
 import WebcamPlayer from '@/components/WebcamPlayer';
 import SkeletonCanvas from '@/components/SkeletonCanvas';
 import VideoPosePlayer, { VideoPosePlayerRef } from '@/components/VideoPosePlayer';
+// AI coach UI & scoring helpers
+import InteractiveScoringPanel from '@/components/InteractiveScoringPanel';
+import { usePerformance } from '@/hooks/usePerformance';
 
 // Coach overlay + logic
 import { CoachFeedbackOverlay, useCoachFeedback } from '@/components/CoachFeedback';
@@ -35,6 +38,9 @@ export default function Home() {
   // Coach overlay state
   const [coachMessages, coachApi] = useCoachFeedback();
 
+  // Live performance metrics derived from existing score
+  const { history, summary, reset: resetPerf } = usePerformance(mockScore, isPlaying);
+
   // Cedar: register a UI tool so the agent can push tips into the overlay
   useRegisterFrontendTool({
     name: 'showCoachFeedback',
@@ -46,6 +52,28 @@ export default function Home() {
     execute: async (args: { text: string; tone?: 'encouragement' | 'tip' | 'celebration' | 'warning' }) => {
       coachApi.push({ text: args.text, tone: args.tone });
       return { ok: true } as const;
+    },
+  });
+
+
+  // Cedar: register basic gameplay control tools the coach can call
+  useRegisterFrontendTool({
+    name: 'startGame',
+    description: 'Start playback and begin scoring',
+    argsSchema: z.object({}),
+    execute: async () => {
+      if (!videoFile) return { ok: false as const, error: 'No video loaded' };
+      await startGame();
+      return { ok: true as const };
+    },
+  });
+  useRegisterFrontendTool({
+    name: 'pauseGame',
+    description: 'Pause playback and scoring',
+    argsSchema: z.object({}),
+    execute: async () => {
+      pauseGame();
+      return { ok: true as const };
     },
   });
 
@@ -151,6 +179,8 @@ export default function Home() {
       isPlaying,
       videoLoaded: !!videoFile,
       isVideoEnded,
+      summary,
+      recentHistory: history.slice(-20),
     }),
     { showInChat: true, color: '#10B981' }
   );
@@ -288,7 +318,8 @@ export default function Home() {
     setMockScore(0);
     setIsVideoEnded(false);
     stopMockScoring();
-    
+    resetPerf();
+
     // FIXED: Reset video explicitly
     if (videoPosePlayerRef.current) {
       videoPosePlayerRef.current.reset();
@@ -301,7 +332,7 @@ export default function Home() {
     }
     
     console.log('Game reset - score reset to 0');
-  }, [stopMockScoring]);
+  }, [stopMockScoring, resetPerf]);
 
   if (!isInitialized) {
     return (
@@ -332,6 +363,28 @@ export default function Home() {
       </div>
     );
   }
+
+  // Ask-the-coach handler: local tips based on scoring summary and recent trend
+  const askCoach = useCallback((question: string) => {
+    const perf = summary;
+    const lastScores = history.slice(-10).map(h => h.score);
+
+    const delta = lastScores.length >= 2 ? lastScores[lastScores.length - 1] - lastScores[0] : 0;
+    const trend = delta >= 8 ? 'surging' : delta >= 3 ? 'improving' : delta <= -8 ? 'dropping-fast' : delta <= -3 ? 'dropping' : 'steady';
+    const tip = trend === 'surging'
+      ? `On fire at ${perf.last}! Keep full extensions and clean timing—lock in that consistency.`
+      : trend === 'improving'
+      ? `Nice climb to ${perf.last}. Relax shoulders and exaggerate arm lines to gain more.`
+      : trend === 'dropping-fast'
+      ? `Quick reset: match big beats and mirror torso angles. Small, precise moves for 10s.`
+      : trend === 'dropping'
+      ? `Tempo check—count the beat and extend arms a touch more to recover.`
+      : perf.last >= 85
+      ? `Elite consistency at ${perf.last}. Maintain posture, breathe, and stay grounded.`
+      : `You’re steady at ${perf.last}. Sync hips with the beat and widen arm paths.`;
+
+    coachApi.push({ text: tip, tone: trend === 'surging' ? 'celebration' : trend.includes('dropping') ? 'warning' : 'tip' });
+  }, [coachApi, history, summary]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-6">
@@ -441,6 +494,15 @@ export default function Home() {
             </div>
           </div>
         </div>
+
+        {/* AI Coach - Ask panel backed by current scoring system */}
+        <InteractiveScoringPanel
+          score={mockScore}
+          isPlaying={isPlaying}
+          history={history}
+          summary={summary}
+          onAsk={askCoach}
+        />
 
       </div>
     </div>
